@@ -58,6 +58,7 @@ pytest tests/python/ -v
 4. **numpy版本**: 使用1.24.3（<2.0），避免与某些旧版C扩展的兼容问题
 5. **验证CUDA**: 每次环境搭建后必须运行 `torch.cuda.is_available()` 验证
 
+```
 poker-ai/                          ← 项目根（总入口）
 │
 ├── README.md                      ← 项目说明 + 环境安装命令（含 CUDA 12.6 特殊指令）
@@ -140,3 +141,4 @@ poker-ai/                          ← 项目根（总入口）
     ├── tasks.json                 ← Ctrl+Shift+B 一键编译 C++ / 安装 Python 包
     ├── launch.json                ← F5 调试：Python 主引擎 / Mock 服务器 / C++ 单元测试
     └── settings.json              ← Python 解释器路径 / CMake 配置目录
+```
