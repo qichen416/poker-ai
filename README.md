@@ -140,5 +140,5 @@ poker-ai/                          ← 项目根（总入口）
     ├── c_cpp_properties.json    ← IntelliSense：告诉 VSCode 头文件在哪里（含 pybind11）
     ├── tasks.json                 ← Ctrl+Shift+B 一键编译 C++ / 安装 Python 包
     ├── launch.json                ← F5 调试：Python 主引擎 / Mock 服务器 / C++ 单元测试
-    └── settings.json              ← Python 解释器路径 / CMake 配置目录
+    └── settings.json              ← Python 解释器路径 / CMake 配置目录 
 ```
