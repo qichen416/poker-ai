@@ -1,0 +1,16 @@
+# === Python 3.10 + CUDA 12.6 兼容版本 ===
+# 警告: 以下版本经过验证，请勿自行降级或升级主要版本
+
+# PyTorch (CUDA 12.6) - 安装命令:
+# pip install torch==2.5.1+cu126 torchvision==0.20.1+cu126 torchaudio==2.5.1+cu126 --extra-index-url https://download.pytorch.org/whl/cu126
+# 注意: 不要直接从requirements安装PyTorch，必须用上面的命令指定CUDA版本
+# 下面的torch行仅用于pip freeze记录，实际安装请用上面的命令
+# torch==2.5.1+cu126
+
+# numpy==1.24.3
+pyyaml==6.0.1
+pytest==7.4.0
+tensorboard==2.15.1
+pybind11==2.11.1
+stable-baselines3==2.3.2
+gymnasium==0.29.1

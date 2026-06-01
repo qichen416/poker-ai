@@ -1,0 +1,73 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "CMake: Configure (MSVC)",
+            "type": "shell",
+            "command": "cmake",
+            "args": [
+                "..",
+                "-G", "Visual Studio 17 2022",
+                "-A", "x64",
+                "-DPYBIND11_PYTHON_VERSION=3.10",
+                "-DPython_ROOT_DIR=${env:CONDA_PREFIX}"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}/cpp/build"
+            },
+            "group": "build",
+            "problemMatcher": ["$msCompile"]
+        },
+        {
+            "label": "CMake: Build Release (MSVC)",
+            "type": "shell",
+            "command": "cmake",
+            "args": ["--build", ".", "--config", "Release", "-j", "8"],
+            "options": {
+                "cwd": "${workspaceFolder}/cpp/build"
+            },
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "problemMatcher": ["$msCompile"],
+            "dependsOn": "CMake: Configure (MSVC)"
+        },
+        {
+            "label": "pip install -e . (Py310)",
+            "type": "shell",
+            "command": "pip",
+            "args": ["install", "-e", ".", "--verbose"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "build",
+            "problemMatcher": []
+        },
+        {
+            "label": "Run Python Tests (Py310)",
+            "type": "shell",
+            "command": "pytest",
+            "args": ["tests/python/", "-v"],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "test",
+            "problemMatcher": []
+        },
+        {
+            "label": "Verify Python 3.10 + CUDA 12.6",
+            "type": "shell",
+            "command": "python",
+            "args": [
+                "-c",
+                "import sys; print(f'Python {sys.version}'); import torch; print(f'PyTorch {torch.__version__}'); print(f'CUDA available: {torch.cuda.is_available()}'); print(f'CUDA version: {torch.version.cuda}'); import numpy; print(f'NumPy {numpy.__version__}')"
+            ],
+            "options": {
+                "cwd": "${workspaceFolder}"
+            },
+            "group": "test",
+            "problemMatcher": []
+        }
+    ]
+}

@@ -1,0 +1,11 @@
+fusion:
+  alpha: 0.5
+  beta: 0.1
+  min_action_prob: 0.05
+timeouts:
+  decision: 5.0
+  fallback_action: "call"
+paths:
+  cfr_preflop: "data/preflop/gto_table_v1.pkl"
+  cfr_postflop: "data/cfr_postflop/baseline_v1.pkl"
+  drl_model: "data/drl_checkpoints/best_model.pt"

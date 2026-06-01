@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# C++构建产物 (Windows)
+cpp/build/
+cpp/out/
+*.so
+*.pyd
+*.dll
+*.lib
+*.exp
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.sln
+*.vcxproj
+*.vcxproj.filters
+x64/
+Release/
+Debug/
+.vs/
+
+# 数据文件
+data/**/*.pkl
+data/**/*.npy
+data/**/*.pt
+data/**/*.json
+
+# 训练日志
+runs/
+logs/
+*.log
+
+# IDE
+.idea/
+.vscode/settings.json
+*.swp
+.DS_Store

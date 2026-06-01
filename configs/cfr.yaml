@@ -1,0 +1,10 @@
+training:
+  iterations: 100000
+  checkpoint_every: 10000
+abstraction:
+  hand_buckets: 10
+  board_buckets: 5
+  action_buckets: 5
+paths:
+  preflop_table: "data/preflop/gto_table_v1.pkl"
+  postflop_baseline: "data/cfr_postflop/baseline_v1.pkl"

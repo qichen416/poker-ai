@@ -1,0 +1,40 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Main Engine (Py310)",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/engine/main.py",
+            "args": ["--host", "localhost", "--port", "8888"],
+            "console": "integratedTerminal",
+            "justMyCode": false
+        },
+        {
+            "name": "Python: Mock Server",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/tests/mock_server.py",
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "Python: DRL Train",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${workspaceFolder}/drl/train.py",
+            "args": ["--config", "configs/drl.yaml"],
+            "console": "integratedTerminal"
+        },
+        {
+            "name": "C++: cpp_test (MSVC)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/cpp/build/Release/cpp_test.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/cpp/build",
+            "environment": [],
+            "console": "externalTerminal"
+        }
+    ]
+}
