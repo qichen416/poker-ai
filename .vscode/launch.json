@@ -26,10 +26,21 @@
             "console": "integratedTerminal"
         },
         {
-            "name": "C++: cpp_test (MSVC)",
+            "name": "C++: test_hand_eval (MSVC)",
             "type": "cppvsdbg",
             "request": "launch",
-            "program": "${workspaceFolder}/cpp/build/Release/cpp_test.exe",
+            "program": "${workspaceFolder}/cpp/build/Release/test_hand_eval.exe",
+            "args": [],
+            "stopAtEntry": false,
+            "cwd": "${workspaceFolder}/cpp/build",
+            "environment": [],
+            "console": "externalTerminal"
+        },
+        {
+            "name": "C++: test_cfr (MSVC)",
+            "type": "cppvsdbg",
+            "request": "launch",
+            "program": "${workspaceFolder}/cpp/build/Release/test_cfr.exe",
             "args": [],
             "stopAtEntry": false,
             "cwd": "${workspaceFolder}/cpp/build",
