@@ -58,17 +58,6 @@ pytest tests/python/ -v
 4. **numpy版本**: 使用1.24.3（<2.0），避免与某些旧版C扩展的兼容问题
 5. **验证CUDA**: 每次环境搭建后必须运行 `torch.cuda.is_available()` 验证
 
-## 启动说明
-
-**1. 必须从 Anaconda Prompt 启动 VSCode**
-
-双击 VSCode 图标会导致 CMake 找不到 Python 3.10！
-
-```powershell
-conda activate poker
-code E:\poker\poker-ai-cu126-py310  //你自己的路径
-```
-
 ## 项目结构
 
 ```
