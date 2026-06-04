@@ -1,6 +1,6 @@
 import socket
 from typing import Optional
-from poker_core import GameState        # 游戏状态核心类（当前未直接使用，可能由调用方使用）
+from poker_core import GameState        # 游戏状态核心类
 from .parser import ProtocolParser      # 自定义协议解析器
 
 class PokerClient:
@@ -55,11 +55,13 @@ class PokerClient:
         """
         try:
             # 接收最多 4096 字节，解码为 UTF-8 字符串并去除首尾空白（包括换行）
-            data = self.socket.recv(4096).decode('utf-8').strip()
-            if not data:
+            if self.socket is None:
+                return None
+            raw_data = self.socket.recv(4096)
+            if not raw_data:
                 # 收到空数据表示连接被对端关闭
                 return None
-            return data
+            return raw_data.decode('utf-8').strip()
         except socket.timeout:
             # 超时没有数据可读，返回 None（调用方可据此判断是否需要重试）
             return None
@@ -74,6 +76,8 @@ class PokerClient:
         :param message: 待发送的消息内容（不含换行符）
         :return: 发送成功返回 True，失败返回 False
         """
+        if self.socket is None:
+            return False
         try:
             # 确保消息以换行符结尾，然后编码为 UTF-8 并发送
             self.socket.sendall(("%s\n" % message).encode('utf-8'))

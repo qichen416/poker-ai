@@ -1,4 +1,5 @@
 import re
+from typing import Optional
 from poker_core import GameState, Card, CardUtils, Stage, Position, ActionType
 
 class ProtocolParser:
@@ -8,7 +9,7 @@ class ProtocolParser:
     支持对 preflop / flop / turn / river 阶段消息以及对手动作消息的解析。
     """
 
-    def parse(self, message: str, current_state: GameState = None) -> GameState:
+    def parse(self, message: str, current_state: Optional[GameState] = None) -> GameState:
         """
         解析一条消息并更新（或创建）游戏状态。
 
@@ -28,7 +29,7 @@ class ProtocolParser:
             self._parse_turn(message, state)
         elif message.startswith('river'):
             self._parse_river(message, state)
-        elif any(message.startswith(a.value) for a in ActionType):
+        elif any(message.startswith(a.name.lower()) for a in ActionType):
             # 如果消息以某个动作类型（如 fold, call, raise 等）开头
             # 则视为对手动作，调用动作解析函数
             self._parse_action(message, state, player='opponent')
@@ -48,9 +49,10 @@ class ProtocolParser:
         # 如果有位置信息（第二段）
         if len(parts) >= 2:
             pos_str = parts[1].strip()
-            # 如果该字符串是有效的 Position 枚举值，则设置我方位置
-            if pos_str in [p.value for p in Position]:
-                state.my_position = Position(pos_str)
+            # 将协议中的位置字符串映射为 Position 枚举
+            _POS_MAP = {'BIGBLIND': Position.BB, 'SMALLBLIND': Position.SB}
+            if pos_str in _POS_MAP:
+                state.my_position = _POS_MAP[pos_str]
 
         # 使用卡牌工具类解析整条消息中的卡牌
         cards = CardUtils.parse_protocol_cards(msg)
