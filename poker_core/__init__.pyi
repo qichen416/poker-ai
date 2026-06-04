@@ -14,7 +14,7 @@ class Card:
     suit: int
     """花色，0=红桃♥, 1=黑桃♠, 2=方块♦, 3=梅花♣"""
     rank: int
-    """点数，0=2, 1=3, ..., 10=J, 11=Q, 12=K, 13=A"""
+    """点数，0=2, 1=3, ..., 9=J, 10=Q, 11=K, 12=A"""
 
     def __init__(self, suit: int, rank: int) -> None: ...
     def index(self) -> int:
