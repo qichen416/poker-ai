@@ -37,6 +37,7 @@ logs/
 
 # IDE
 .idea/
+.claude/
 .vscode/settings.json
 *.swp
 .DS_Store
