@@ -62,6 +62,10 @@ PYBIND11_MODULE(_core, m) {
         .value("ALLIN", ActionType::ALLIN);
 
     py::class_<ActionRecord>(m, "ActionRecord")
+        // 允许 Python 协议解析器创建与 C++ 环境相同的数据记录。
+        .def(py::init<Stage, ActionType, int, bool>(),
+             py::arg("stage"), py::arg("action"), py::arg("amount"),
+             py::arg("is_opponent"))
         .def_readwrite("stage", &ActionRecord::stage)
         .def_readwrite("action", &ActionRecord::action)
         .def_readwrite("amount", &ActionRecord::amount)
@@ -107,6 +111,10 @@ PYBIND11_MODULE(_core, m) {
         .def(py::init<>())
         .def("reset", &SelfPlayEnv::reset, py::arg("seed") = 0)
         .def("step", &SelfPlayEnv::step)
+        // 暴露动作合法性接口，供 Python 决策器做概率掩码和最终安全校验。
+        .def("legal_actions", &SelfPlayEnv::legal_actions)
+        .def("is_action_legal", &SelfPlayEnv::is_action_legal,
+             py::arg("action"), py::arg("amount") = 0)
         .def("step_batch", &SelfPlayEnv::step_batch)
         .def("set_opponent_policy", &SelfPlayEnv::set_opponent_policy);
 

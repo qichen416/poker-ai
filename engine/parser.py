@@ -1,146 +1,201 @@
-import re
 from typing import Optional
-from poker_core import GameState, Card, CardUtils, Stage, Position, ActionType
+
+from poker_core import (
+    ActionRecord,
+    ActionType,
+    CardUtils,
+    GameState,
+    Position,
+    Stage,
+)
+from shared.constants import BIG_BLIND, INITIAL_CHIPS, SMALL_BLIND
+from shared.utils import parse_action_string
+
+
+_ACTION_TYPES = {
+    "fold": ActionType.FOLD,
+    "check": ActionType.CHECK,
+    "call": ActionType.CALL,
+    "bet": ActionType.BET,
+    "raise": ActionType.RAISE,
+    "allin": ActionType.ALLIN,
+}
+
 
 class ProtocolParser:
+    """将平台协议消息持续合并到同一个 GameState。
+
+    解析器额外保存双方“本街累计投入”。GameState 只有 to_call，无法仅凭它
+    正确还原连续 raise/call，因此这两个内部字段是筹码同步的必要上下文。
     """
-    协议解析器
-    负责将服务器发送的文本协议消息解析为结构化的游戏状态对象。
-    支持对 preflop / flop / turn / river 阶段消息以及对手动作消息的解析。
-    """
 
-    def parse(self, message: str, current_state: Optional[GameState] = None) -> GameState:
-        """
-        解析一条消息并更新（或创建）游戏状态。
+    def __init__(self):
+        # 进入新街道时清零；翻前则初始化为大小盲。
+        self._hero_street_commit = 0
+        self._opponent_street_commit = 0
 
-        :param message: 服务器发来的单条协议字符串
-        :param current_state: 当前游戏状态，若为 None 则创建新状态
-        :return: 更新后的 GameState 对象
-        """
-        # 如果没有传入当前状态，则创建一个新的空状态
-        state = current_state or GameState()
+    def parse(
+        self,
+        message: str,
+        current_state: Optional[GameState] = None,
+    ) -> GameState:
+        state = current_state if current_state is not None else GameState()
+        message = message.strip()
 
-        # 根据消息前缀判断阶段或动作类型
-        if message.startswith('preflop'):
+        # 街道消息负责牌面和阶段，动作消息默认来自对手。
+        if message.startswith("preflop"):
             self._parse_preflop(message, state)
-        elif message.startswith('flop'):
+        elif message.startswith("flop"):
             self._parse_flop(message, state)
-        elif message.startswith('turn'):
+        elif message.startswith("turn"):
             self._parse_turn(message, state)
-        elif message.startswith('river'):
+        elif message.startswith("river"):
             self._parse_river(message, state)
-        elif any(message.startswith(a.name.lower()) for a in ActionType):
-            # 如果消息以某个动作类型（如 fold, call, raise 等）开头
-            # 则视为对手动作，调用动作解析函数
-            self._parse_action(message, state, player='opponent')
-        # 其他未知消息不修改状态，直接返回
+        elif message.split(maxsplit=1)[0].lower() in _ACTION_TYPES:
+            self.record_action(message, state, is_opponent=True)
+        else:
+            raise ValueError("unknown protocol message: %s" % message)
         return state
 
-    def _parse_preflop(self, msg: str, state: GameState):
+    def record_action(
+        self,
+        message: str,
+        state: GameState,
+        is_opponent: bool,
+    ) -> None:
+        """把一次已确认发生的动作写入筹码、底池、历史和 to_call。
+
+        协议中的 ``bet N`` / ``raise N`` 按项目约定表示“本次额外投入 N”，
+        与 C++ SelfPlayEnv 内部使用的“本街加到 N”语义不同，调用时不要混用。
         """
-        解析 preflop 阶段消息。
-        消息格式示例: "preflop|BIGBLIND|AsKh" 或 "preflop|SMALLBLIND|2c3c"
+        action_name, declared_amount = parse_action_string(message)
+        if action_name not in _ACTION_TYPES:
+            raise ValueError("unknown poker action: %s" % action_name)
+        if declared_amount < 0:
+            raise ValueError("action amount cannot be negative")
 
-        :param msg: 原始消息字符串
-        :param state: 待更新的游戏状态
-        """
-        # 用竖线分割消息段
-        parts = msg.split('|')
-        # 如果有位置信息（第二段）
-        if len(parts) >= 2:
-            pos_str = parts[1].strip()
-            # 将协议中的位置字符串映射为 Position 枚举
-            _POS_MAP = {'BIGBLIND': Position.BB, 'SMALLBLIND': Position.SB}
-            if pos_str in _POS_MAP:
-                state.my_position = _POS_MAP[pos_str]
+        action = _ACTION_TYPES[action_name]
+        chips = state.opponent_chips if is_opponent else state.my_chips
+        own_commit = (
+            self._opponent_street_commit
+            if is_opponent
+            else self._hero_street_commit
+        )
+        other_commit = (
+            self._hero_street_commit
+            if is_opponent
+            else self._opponent_street_commit
+        )
 
-        # 使用卡牌工具类解析整条消息中的卡牌
-        cards = CardUtils.parse_protocol_cards(msg)
-        # 若解析出至少2张牌，设为我的手牌
-        if len(cards) >= 2:
-            state.my_cards = [cards[0], cards[1]]
+        if action in (ActionType.FOLD, ActionType.CHECK):
+            contribution = 0
+        elif action == ActionType.CALL:
+            # 跟注只补齐双方本街投入差，短码时最多投入剩余全部筹码。
+            contribution = min(max(0, other_commit - own_commit), chips)
+        elif action in (ActionType.BET, ActionType.RAISE):
+            if declared_amount <= 0:
+                raise ValueError("%s requires a positive amount" % action_name)
+            contribution = min(declared_amount, chips)
+        else:  # ALLIN
+            contribution = chips
 
-        # 设置当前游戏阶段为 PREFLOP
-        state.stage = Stage.PREFLOP
+        if is_opponent:
+            state.opponent_chips -= contribution
+            self._opponent_street_commit += contribution
+        else:
+            state.my_chips -= contribution
+            self._hero_street_commit += contribution
 
-    def _parse_flop(self, msg: str, state: GameState):
-        """
-        解析 flop 阶段消息。
-        消息格式示例: "flop|AcKdQh"
+        state.pot += contribution
+        # pybind11 的 vector 属性读取后是 Python 副本，需要整体写回才能更新 C++。
+        history = list(state.history)
+        history.append(
+            ActionRecord(state.stage, action, contribution, is_opponent)
+        )
+        state.history = history
+        state.to_call = max(
+            # to_call 始终站在英雄视角：对手本街投入减英雄本街投入。
+            0, self._opponent_street_commit - self._hero_street_commit
+        )
 
-        :param msg: 原始消息字符串
-        :param state: 待更新的游戏状态
-        """
-        cards = CardUtils.parse_protocol_cards(msg)
-        # 至少需要3张牌才构成有效翻牌
-        if len(cards) >= 3:
-            # 将前3张作为公共牌
-            state.community_cards = [cards[0], cards[1], cards[2]]
-            state.num_community = 3
+    def _parse_preflop(self, message: str, state: GameState) -> None:
+        parts = message.split("|")
+        if len(parts) < 3:
+            raise ValueError("invalid preflop message: %s" % message)
 
-        # 更新阶段为 FLOP
-        state.stage = Stage.FLOP
-
-    def _parse_turn(self, msg: str, state: GameState):
-        """
-        解析 turn 阶段消息。
-        消息格式示例: "turn|2h"
-
-        :param msg: 原始消息字符串
-        :param state: 待更新的游戏状态
-        """
-        cards = CardUtils.parse_protocol_cards(msg)
-        if cards:
-            # 公共牌数组已经预留了5个位置，按 num_community 索引填入新牌
-            state.community_cards[state.num_community] = cards[0]
-            state.num_community += 1
-
-        # 更新阶段为 TURN
-        state.stage = Stage.TURN
-
-    def _parse_river(self, msg: str, state: GameState):
-        """
-        解析 river 阶段消息。
-        消息格式示例: "river|8s"
-
-        :param msg: 原始消息字符串
-        :param state: 待更新的游戏状态
-        """
-        cards = CardUtils.parse_protocol_cards(msg)
-        if cards:
-            # 类似 Turn 的处理，将最后一张公共牌填入
-            state.community_cards[state.num_community] = cards[0]
-            state.num_community += 1
-
-        # 更新阶段为 RIVER
-        state.stage = Stage.RIVER
-
-    def _parse_action(self, msg: str, state: GameState, player: str):
-        """
-        解析对手动作消息。
-        消息格式示例: "raise 200" 或 "fold"
-
-        :param msg: 原始动作字符串
-        :param state: 当前游戏状态，用于记录历史
-        :param player: 动作来源（如 'opponent' 表示对手）
-        """
-        # 按空格分割，第一段是动作类型，第二段（可选）是下注/加注额度
-        parts = msg.split()
-        action_str = parts[0].lower()
-        amount = int(parts[1]) if len(parts) > 1 else 0
-
-        # 动作字符串到 ActionType 枚举的映射
-        action_map = {
-            'fold': ActionType.FOLD,
-            'check': ActionType.CHECK,
-            'call': ActionType.CALL,
-            'bet': ActionType.BET,
-            'raise': ActionType.RAISE,
-            'allin': ActionType.ALLIN
+        positions = {
+            "BIGBLIND": Position.BB,
+            "SMALLBLIND": Position.SB,
         }
-        # 获取动作枚举，未知动作默认为 FOLD
-        action = action_map.get(action_str, ActionType.FOLD)
+        position_name = parts[1].strip().upper()
+        if position_name not in positions:
+            raise ValueError("unknown position: %s" % position_name)
 
-        # 将动作记录追加到历史记录中
-        # 注意：这里使用了 ActionRecord 类，但代码中尚未定义该类的实现。
-        # state.history.append(ActionRecord(state.stage, action, amount, player == 'opponent'))
+        cards = CardUtils.parse_protocol_cards(message)
+        if len(cards) != 2:
+            raise ValueError("preflop message must contain exactly two cards")
+
+        state.history = []
+        state.num_community = 0
+        state.my_cards = cards
+        state.my_position = positions[position_name]
+        state.stage = Stage.PREFLOP
+        state.my_chips = INITIAL_CHIPS
+        state.opponent_chips = INITIAL_CHIPS
+        state.pot = SMALL_BLIND + BIG_BLIND
+
+        # 平台会告知英雄座位；据此扣除双方盲注并建立翻前投入基线。
+        if state.my_position == Position.SB:
+            state.my_chips -= SMALL_BLIND
+            state.opponent_chips -= BIG_BLIND
+            self._hero_street_commit = SMALL_BLIND
+            self._opponent_street_commit = BIG_BLIND
+        else:
+            state.my_chips -= BIG_BLIND
+            state.opponent_chips -= SMALL_BLIND
+            self._hero_street_commit = BIG_BLIND
+            self._opponent_street_commit = SMALL_BLIND
+        state.to_call = max(
+            0, self._opponent_street_commit - self._hero_street_commit
+        )
+
+    def _start_street(self, state: GameState, stage: Stage) -> None:
+        # 每条街都是独立下注轮，之前街道的投入已经包含在 pot 中。
+        state.stage = stage
+        state.to_call = 0
+        self._hero_street_commit = 0
+        self._opponent_street_commit = 0
+
+    def _parse_flop(self, message: str, state: GameState) -> None:
+        cards = CardUtils.parse_protocol_cards(message)
+        if len(cards) != 3:
+            raise ValueError("flop message must contain exactly three cards")
+        board = list(state.community_cards)
+        # community_cards 在 C++ 中是固定长度 array，必须保留 5 个槽位整体写回。
+        board[:3] = cards
+        state.community_cards = board
+        state.num_community = 3
+        self._start_street(state, Stage.FLOP)
+
+    def _parse_turn(self, message: str, state: GameState) -> None:
+        self._append_board_card(message, state, expected_count=3)
+        self._start_street(state, Stage.TURN)
+
+    def _parse_river(self, message: str, state: GameState) -> None:
+        self._append_board_card(message, state, expected_count=4)
+        self._start_street(state, Stage.RIVER)
+
+    @staticmethod
+    def _append_board_card(
+        message: str,
+        state: GameState,
+        expected_count: int,
+    ) -> None:
+        cards = CardUtils.parse_protocol_cards(message)
+        # 强制按 flop→turn→river 顺序到达，避免重复消息悄悄覆盖牌面。
+        if len(cards) != 1 or state.num_community != expected_count:
+            raise ValueError("community cards arrived out of order")
+        board = list(state.community_cards)
+        board[expected_count] = cards[0]
+        state.community_cards = board
+        state.num_community = expected_count + 1

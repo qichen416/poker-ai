@@ -11,6 +11,31 @@ from engine.fusion import DecisionEngine
 # 导入游戏状态数据结构
 from poker_core import GameState
 
+
+def run_game(client, protocol_parser, decide):
+    """运行一段平台协议会话，并返回最后同步成功的状态。
+
+    决策动作必须先成功发送，再写入本地 GameState；否则网络发送失败会让
+    本地筹码领先于服务端，后续所有 to_call 都会建立在错误状态上。
+    """
+    state = GameState()
+    while True:
+        message = client.receive()
+        if message is None:
+            # 超时但 socket 仍存在时继续等待；真正断开且重连失败时才结束会话。
+            if client.connected:
+                continue
+            return state
+        if message == "gameover":
+            return state
+
+        state = protocol_parser.parse(message, state)
+        action = decide(state)
+        if not client.send(action):
+            return state
+        # sendall 成功后才能确认本次英雄动作已被本地状态接受。
+        protocol_parser.record_action(action, state, is_opponent=False)
+
 def main():
     # 创建命令行参数解析器
     parser = argparse.ArgumentParser()
@@ -27,9 +52,6 @@ def main():
     parser = ProtocolParser()
     # 创建决策引擎
     engine = DecisionEngine()
-    # 初始化一个空游戏状态（阶段通常为 PREFLOP，无手牌和公共牌）
-    state = GameState()
-
     # 尝试连接服务器，如果失败则打印错误并退出
     if not client.connect():
         print("Failed to connect, exiting")
@@ -39,30 +61,8 @@ def main():
     print("=== Poker AI started ===")
 
     try:
-        # 进入主循环，持续接收并处理服务器消息
-        while True:
-            # 阻塞接收一条消息（服务器一行协议文本）
-            msg = client.receive()
-            # 如果收到空消息（连接断开），跳出循环
-            if msg is None:
-                break
-            # 如果消息为 'gameover'，表示游戏结束，跳出循环
-            if msg == 'gameover':
-                print("Game over")
-                break
-            # 使用协议解析器将消息应用到当前状态，更新手牌、公共牌、阶段等信息
-            state = parser.parse(msg, state)
-            # 打印收到的原始消息
-            print("Received: %s" % msg)
-            # 打印更新后的游戏状态
-            print("State: %s" % state)
-            # 决策引擎根据当前状态生成动作（如 fold, call, raise 等）
-            action = engine.make_decision(state)
-            # 打印 AI 决定采取的动作
-            print("Action: %s" % action)
-            # 将动作发送给服务器，如果发送失败则跳出循环
-            if not client.send(action):
-                break
+        run_game(client, parser, engine.make_decision)
+        print("Game over")
     except KeyboardInterrupt:
         # 用户按下 Ctrl+C，优雅中断
         print("Interrupted by user")

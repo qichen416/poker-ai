@@ -1,97 +1,123 @@
 import socket
+import time
 from typing import Optional
-from poker_core import GameState        # 游戏状态核心类
-from .parser import ProtocolParser      # 自定义协议解析器
+
 
 class PokerClient:
+    """使用换行分帧的可靠 TCP 客户端。
+
+    TCP 是字节流，一次 recv 可能只含半条消息，也可能粘连多条消息，因此
+    `_receive_buffer` 会保留尚未消费的字节，receive() 每次只返回一帧。
     """
-    扑克游戏 TCP 客户端。
 
-    负责与扑克游戏服务器建立连接、发送指令、接收响应，
-    并利用 ProtocolParser 解析服务器返回的协议消息。
-    """
-
-    def __init__(self, host: str, port: int, timeout: float = 10.0):
-        """
-        初始化客户端实例。
-
-        :param host: 服务器主机名或 IP 地址
-        :param port: 服务器端口号
-        :param timeout: 套接字操作超时时间（秒），默认 10.0 秒
-        """
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        timeout: float = 10.0,
+        reconnect_attempts: int = 3,
+        reconnect_delay: float = 0.2,
+        auto_reconnect: bool = True,
+    ):
         self.host = host
         self.port = port
-        self.socket: Optional[socket.socket] = None   # TCP 套接字，连接后赋值
-        self.parser = ProtocolParser()                # 协议解析器，用于处理接收到的数据
         self.timeout = timeout
+        self.reconnect_attempts = max(1, reconnect_attempts)
+        self.reconnect_delay = max(0.0, reconnect_delay)
+        self.auto_reconnect = auto_reconnect
+        self.socket: Optional[socket.socket] = None
+        # 跨 recv 调用保存半包，同时保留粘包中的后续完整帧。
+        self._receive_buffer = bytearray()
+        # 用户主动 close 后禁止自动重连，避免程序退出时重新建立连接。
+        self._closing = False
+
+    @property
+    def connected(self) -> bool:
+        return self.socket is not None
 
     def connect(self) -> bool:
-        """
-        建立与服务器的 TCP 连接。
+        self._closing = False
+        for attempt in range(self.reconnect_attempts):
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(self.timeout)
+                sock.connect((self.host, self.port))
+                self.socket = sock
+                # 新连接不能继承旧连接尚未完成的半条协议消息。
+                self._receive_buffer.clear()
+                return True
+            except OSError:
+                try:
+                    sock.close()
+                except UnboundLocalError:
+                    pass
+                self.socket = None
+                if attempt + 1 < self.reconnect_attempts:
+                    time.sleep(self.reconnect_delay)
+        return False
 
-        :return: 连接成功返回 True，否则返回 False
-        """
-        try:
-            # 创建 TCP 套接字
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            # 设置超时，避免 recv 等操作无限阻塞
-            self.socket.settimeout(self.timeout)
-            # 连接服务器
-            self.socket.connect((self.host, self.port))
-            print("Connected to %s:%d" % (self.host, self.port))
-            return True
-        except Exception as e:
-            print("Connection failed: %s" % e)
+    def reconnect(self) -> bool:
+        """关闭失效 socket，并按 connect() 的重试策略建立新连接。"""
+        self._close_socket()
+        if self._closing:
             return False
+        return self.connect()
 
     def receive(self) -> Optional[str]:
-        """
-        从服务器接收一行数据（以换行符分隔的消息）。
+        """Return exactly one UTF-8 line, regardless of TCP packet boundaries."""
+        while True:
+            # 优先消费缓冲区；处理粘包时无需再次访问网络。
+            newline = self._receive_buffer.find(b"\n")
+            if newline >= 0:
+                frame = bytes(self._receive_buffer[:newline])
+                del self._receive_buffer[: newline + 1]
+                return frame.rstrip(b"\r").decode("utf-8")
 
-        该方法会阻塞直到接收到数据、超时或发生错误。
-        注意：返回的字符串已去除首尾空白（包括换行符）。
-
-        :return: 接收到的消息字符串；超时或连接关闭时返回 None；出错时也返回 None
-        """
-        try:
-            # 接收最多 4096 字节，解码为 UTF-8 字符串并去除首尾空白（包括换行）
             if self.socket is None:
+                if not self.auto_reconnect or not self.reconnect():
+                    return None
+
+            try:
+                chunk = self.socket.recv(4096)
+                if not chunk:
+                    # recv 返回空字节表示对端已正常关闭连接。
+                    if not self.auto_reconnect or not self.reconnect():
+                        return None
+                    continue
+                self._receive_buffer.extend(chunk)
+                # 比赛协议消息应很短；限制帧长可防止异常服务端无限占用内存。
+                if len(self._receive_buffer) > 65536:
+                    raise ValueError("protocol frame exceeds 64 KiB")
+            except socket.timeout:
                 return None
-            raw_data = self.socket.recv(4096)
-            if not raw_data:
-                # 收到空数据表示连接被对端关闭
-                return None
-            return raw_data.decode('utf-8').strip()
-        except socket.timeout:
-            # 超时没有数据可读，返回 None（调用方可据此判断是否需要重试）
-            return None
-        except Exception as e:
-            print("Receive error: %s" % e)
-            return None
+            except (OSError, UnicodeError):
+                if not self.auto_reconnect or not self.reconnect():
+                    return None
 
     def send(self, message: str) -> bool:
-        """
-        向服务器发送一条消息，自动附加换行符作为消息结束标志。
+        """Send one complete protocol frame.
 
-        :param message: 待发送的消息内容（不含换行符）
-        :return: 发送成功返回 True，失败返回 False
+        发送失败后不会自动重放动作：服务端可能已经收到第一次下注，自动重发
+        会造成重复行动。上层必须根据平台的重连/局面恢复协议决定如何继续。
         """
         if self.socket is None:
             return False
         try:
-            # 确保消息以换行符结尾，然后编码为 UTF-8 并发送
-            self.socket.sendall(("%s\n" % message).encode('utf-8'))
+            self.socket.sendall(("%s\n" % message).encode("utf-8"))
             return True
-        except Exception as e:
-            print("Send error: %s" % e)
+        except OSError:
+            self._close_socket()
             return False
 
-    def close(self):
-        """
-        关闭与服务器的连接，释放套接字资源。
+    def close(self) -> None:
+        """用户主动关闭连接并清除所有未完成帧。"""
+        self._closing = True
+        self._close_socket()
+        self._receive_buffer.clear()
 
-        如果已经处于关闭状态，则不做任何操作。
-        """
-        if self.socket:
-            self.socket.close()
-            self.socket = None
+    def _close_socket(self) -> None:
+        if self.socket is not None:
+            try:
+                self.socket.close()
+            finally:
+                self.socket = None

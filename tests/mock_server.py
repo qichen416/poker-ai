@@ -1,110 +1,132 @@
+import random
 import socket
 import threading
-import random
-from poker_core import Card, CardUtils  # 假设的自定义模块，提供扑克牌和工具函数
+from typing import List, Optional, Tuple
+
+from poker_core import CardUtils
+
 
 class MockServer:
+    """可重复、可停止的比赛协议测试服务器。
+
+    固定随机种子保证发牌可复现；记录客户端动作并严格校验顺序，使集成测试
+    同时覆盖 TCP 分帧、协议解析、状态更新和主循环发送行为。
     """
-    模拟德州扑克游戏服务器
-    用于测试扑克 AI 客户端，按阶段发送手牌和公共牌，
-    接收客户端的动作响应，但不进行筹码结算或胜负判定。
-    """
-    def __init__(self, host='localhost', port=10002):
-        """
-        初始化模拟服务器
-        :param host: 监听的 IP 地址，默认 localhost
-        :param port: 监听的端口号，默认 10002
-        """
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 10002, seed: int = 7):
         self.host = host
         self.port = port
-        # 创建一副完整的扑克牌（通常为52张）
-        self.deck = CardUtils.create_deck()
+        self.seed = seed
+        self.actions: List[str] = []
+        self.error: Optional[BaseException] = None
+        self._server_socket: Optional[socket.socket] = None
+        self._ready = threading.Event()
+        self._stop = threading.Event()
 
-    def _deal_cards(self):
-        """
-        洗牌并分配手牌和公共牌
-        :return: (玩家A手牌列表, 玩家B手牌列表, 公共牌列表)
-                 玩家A手牌发给客户端，玩家B手牌不使用，公共牌分阶段发送
-        """
-        random.shuffle(self.deck)          # 随机打乱牌堆
-        # 前2张给玩家A，接下来2张给玩家B，再5张为公共牌
-        return self.deck[0:2], self.deck[2:4], self.deck[4:9]
+    @property
+    def address(self) -> Tuple[str, int]:
+        return self.host, self.port
 
-    def _run_game(self, client_socket):
-        """
-        为单个客户端连接运行一局完整的游戏
-        :param client_socket: 已建立的客户端套接字
-        """
-        try:
-            # ---------- 发牌阶段 ----------
-            hole1, hole2, community = self._deal_cards()  # 获取分配的牌
-            # 构造 preflop 消息：阶段|位置|手牌
-            # 标记客户端为 BIGBLIND（大盲位），实际这里固定写死
-            msg = "preflop|BIGBLIND|%s" % CardUtils.cards_to_protocol(hole1)
-            # 发送消息，末尾加换行作为协议分隔符
-            client_socket.sendall(("%s\n" % msg).encode())
-            # 等待客户端返回动作（如 fold/call/raise）
-            action1 = client_socket.recv(1024).decode().strip()
-            print("[Mock] Preflop action: %s" % action1)
+    def serve_in_thread(self, max_games: int = 1) -> threading.Thread:
+        """后台启动服务器，并等待 bind/listen 完成后再把端口交给客户端。"""
+        thread = threading.Thread(
+            target=self.start,
+            kwargs={"max_games": max_games},
+            daemon=True,
+        )
+        thread.start()
+        if not self._ready.wait(timeout=5):
+            raise RuntimeError("mock server did not start")
+        return thread
 
-            # ---------- Flop 阶段 ----------
-            # 发送前3张公共牌
-            msg = "flop|%s" % CardUtils.cards_to_protocol(community[:3])
-            client_socket.sendall(("%s\n" % msg).encode())
-            action2 = client_socket.recv(1024).decode().strip()
-            print("[Mock] Flop action: %s" % action2)
-
-            # ---------- Turn 阶段 ----------
-            # 发送第4张公共牌（单张）
-            msg = "turn|%s" % community[3].to_protocol()
-            client_socket.sendall(("%s\n" % msg).encode())
-            action3 = client_socket.recv(1024).decode().strip()
-            print("[Mock] Turn action: %s" % action3)
-
-            # ---------- River 阶段 ----------
-            # 发送第5张公共牌（单张）
-            msg = "river|%s" % community[4].to_protocol()
-            client_socket.sendall(("%s\n" % msg).encode())
-            action4 = client_socket.recv(1024).decode().strip()
-            print("[Mock] River action: %s" % action4)
-
-            # ---------- 游戏结束 ----------
-            client_socket.sendall(b"gameover\n")
-            print("[Mock] Game over")
-
-        except Exception as e:
-            print("[Mock] Error: %s" % e)
-        finally:
-            # 确保连接关闭
-            client_socket.close()
-
-    def start(self):
-        """
-        启动模拟服务器，监听端口并为每个客户端创建线程处理游戏
-        """
-        # 创建 TCP 套接字
+    def start(self, max_games: Optional[int] = None) -> None:
+        games = 0
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        # 允许端口重用，避免重启时地址被占用
+        self._server_socket = sock
         sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         sock.bind((self.host, self.port))
-        sock.listen(5)  # 最大等待连接队列长度
-        print("[Mock] Server listening on %s:%d" % (self.host, self.port))
+        # port=0 时由操作系统选择空闲端口，可避免并行测试端口冲突。
+        self.port = sock.getsockname()[1]
+        sock.listen(5)
+        sock.settimeout(0.2)
+        self._ready.set()
 
         try:
-            while True:
-                # 等待客户端连接
-                client, addr = sock.accept()
-                print("[Mock] Client connected from %s" % str(addr))
-                # 为每个客户端启动一个守护线程，主线程退出时自动结束
-                thread = threading.Thread(target=self._run_game, args=(client,))
-                thread.daemon = True
-                thread.start()
-        except KeyboardInterrupt:
-            # Ctrl+C 时优雅关闭
-            print("[Mock] Server shutting down")
+            while not self._stop.is_set() and (
+                max_games is None or games < max_games
+            ):
+                try:
+                    client, _address = sock.accept()
+                except socket.timeout:
+                    continue
+                with client:
+                    client.settimeout(5)
+                    self._run_game(client, games)
+                games += 1
+        except BaseException as error:
+            self.error = error
         finally:
             sock.close()
+            self._server_socket = None
 
-if __name__ == '__main__':
-    # 程序入口：启动模拟服务器
+    def stop(self) -> None:
+        self._stop.set()
+        if self._server_socket is not None:
+            try:
+                self._server_socket.close()
+            except OSError:
+                pass
+
+    def _run_game(self, client: socket.socket, game_number: int) -> None:
+        deck = list(CardUtils.create_deck())
+        random.Random(self.seed + game_number).shuffle(deck)
+        hole = deck[:2]
+        board = deck[4:9]
+        receive_buffer = bytearray()
+
+        # 每个元组是“服务端消息 → 期望客户端动作”，包含跨街下注和跟注。
+        script = [
+            (
+                "preflop|SMALLBLIND|%s" % CardUtils.cards_to_protocol(hole),
+                "call",
+            ),
+            ("raise 200", "call"),
+            (
+                "flop|%s" % CardUtils.cards_to_protocol(board[:3]),
+                "check",
+            ),
+            ("bet 100", "call"),
+            ("turn|%s" % board[3].to_protocol(), "check"),
+            ("river|%s" % board[4].to_protocol(), "check"),
+        ]
+
+        for message, expected_action in script:
+            self._send_line(client, message)
+            action = self._receive_line(client, receive_buffer)
+            self.actions.append(action)
+            if action.split(maxsplit=1)[0] != expected_action:
+                raise AssertionError(
+                    "expected %s, received %s" % (expected_action, action)
+                )
+        self._send_line(client, "gameover")
+
+    @staticmethod
+    def _send_line(client: socket.socket, message: str) -> None:
+        client.sendall(("%s\n" % message).encode("utf-8"))
+
+    @staticmethod
+    def _receive_line(client: socket.socket, buffer: bytearray) -> str:
+        # Mock 端也按字节流处理，不能假设一次 recv 恰好得到一条动作。
+        while b"\n" not in buffer:
+            chunk = client.recv(1024)
+            if not chunk:
+                raise ConnectionError("client disconnected before sending action")
+            buffer.extend(chunk)
+        newline = buffer.index(b"\n")
+        frame = bytes(buffer[:newline])
+        del buffer[: newline + 1]
+        return frame.rstrip(b"\r").decode("utf-8")
+
+
+if __name__ == "__main__":
     MockServer().start()

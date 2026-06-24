@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <stdexcept>
 
 namespace poker {
 
@@ -11,7 +12,12 @@ struct Card {
     uint8_t rank;
 
     Card() = default;
-    Card(uint8_t s, uint8_t r) : suit(s), rank(r) {}
+    Card(uint8_t s, uint8_t r) : suit(s), rank(r) {
+        // 尽早拒绝非法牌，避免越界值进入 index()、牌型评估和蒙特卡洛牌堆。
+        if (s >= 4 || r >= 13) {
+            throw std::out_of_range("card suit or rank is out of range");
+        }
+    }
 
     bool operator==(const Card& other) const {
         return suit == other.suit && rank == other.rank;

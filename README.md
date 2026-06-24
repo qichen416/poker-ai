@@ -144,3 +144,77 @@ poker-ai/                          ← 项目根（总入口）
     ├── launch.json                ← F5 调试：Python 主引擎 / Mock 服务器 / C++ 单元测试
     └── settings.json              ← Python 解释器路径 / CMake 配置目录 
 ```
+
+## 当前实现进度（2026-06-18 更新）
+
+### ✅ 已完成模块
+
+| 模块 | 文件 | 状态 | 说明 |
+|------|------|------|------|
+| **Card（扑克牌）** | `cpp/src/card.cpp` | ✅ 完成 | 52 张牌建模，协议解析 `parse_protocol_cards()` |
+| **HandEvaluator（手牌评估）** | `cpp/src/hand_evaluator.cpp` | ✅ 完成 | **全部 9 种牌型判定**：同花顺 → 四条 → 葫芦 → 同花 → 顺子 → 三条 → 两对 → 一对 → 高牌；正确处理轮子顺子 A-2-3-4-5；21 种 7 选 5 组合枚举选最优；kickers 按优先级填充支持同牌型比较 |
+| **WinRateCalculator（蒙特卡洛胜率）** | `cpp/src/win_rate.cpp` | ✅ 完成 | 蒙特卡洛权益计算，正确平分平局底池，支持多对手、批量计算和输入校验 |
+| **GameState（游戏状态）** | `cpp/src/game_state.cpp` | ✅ 完成 | 手牌/公共牌/筹码/位置/阶段/动作历史 |
+| **SelfPlayEnv（单挑规则环境）** | `cpp/src/environment.cpp` | ✅ 完成 | 盲注、合法动作、下注/加注/跟注/弃牌/全押、街道推进、摊牌、奖励与筹码结算 |
+| **pybind11 绑定** | `cpp/python_bindings/bindings.cpp` | ✅ 完成 | C++ → Python 接口，包含 `legal_actions()` / `is_action_legal()` |
+| **TCP 通信客户端** | `engine/client.py` | ✅ 完成 | Socket 收发，超时保护 |
+| **协议解析器** | `engine/parser.py` | ✅ 完成 | 文本协议 → GameState（preflop/flop/turn/river/动作） |
+| **对手建模** | `eval/opponent_model.py` | ✅ 完成 | VPIP / PFR / AF 统计 + 剥削偏移 |
+| **Elo 评分** | `eval/elo.py` | ✅ 完成 | 两版本 A/B 对打评分 |
+| **Mock 服务器** | `tests/mock_server.py` | ✅ 完成 | 模拟平台：发牌 → 收动作 → 继续发牌 |
+
+### 🔴 待实现模块（阻塞项）
+
+| 模块 | 文件 | 状态 | 缺失内容 |
+|------|------|------|----------|
+| **CFR 引擎** | `cpp/src/cfr_engine.cpp` | 🔴 骨架 | `make_info_set_key()` 只返回 `"default"`；`train_iteration()` 是空 TODO；`save/load_strategy()` 未实现 |
+| **DRL 推理** | `drl/infer.py` | 🔴 假实现 | `get_action_probs()` 返回硬编码值，不走网络前向 |
+| **DRL 训练** | `drl/train.py` | 🔴 骨架 | 只有 "Training stub"，PPO 循环未实现 |
+| **决策融合层** | `engine/fusion.py` | 🟡 半成品 | 框架存在，但依赖 CFR + DRL 两个上游模块 |
+
+### 🧪 测试状态
+
+```
+=== Poker Hand Evaluator Tests ===
+  PASS: High Card (rank=1)
+  PASS: One Pair (rank=2)
+  PASS: Two Pair (rank=3)
+  PASS: Three of a Kind (rank=4)
+  PASS: Straight (rank=5)
+  PASS: Wheel Straight (A-5) (rank=5)
+  PASS: Flush (rank=6)
+  PASS: Full House (rank=7)
+  PASS: Four of a Kind (rank=8)
+  PASS: Straight Flush (rank=9)
+  PASS: Royal Flush (rank=9)
+  PASS: Straight Flush > Four of a Kind
+  PASS: AAKKQ > KKQQA (two pair comparison)
+  PASS: Identical hands tie
+========== Results: 14 passed, 0 failed ==========
+```
+
+### 🎯 建议下一步（按优先级）
+
+1. **P1 实现 CFR 引擎 MCCFR 遍历** — 核心算法基石，翻前策略表依赖它
+2. **P2 实现 PPO 训练循环 + 真实 DRL 推理** — 翻后决策能力的关键
+3. **P3 实现 DRL 环境封装与特征工程** — 复用已经完成的 C++ SelfPlayEnv
+4. **P4 补全 parser.py 的 ActionRecord 记录** — 目前有一行代码不完整
+
+### 底层基础验收（2026-06-24）
+
+- C++：5 组测试全部通过（Card / HandEvaluator / WinRate / GameState+SelfPlayEnv / CFR 概率接口）
+- Python 绑定：9 项测试全部通过
+- SelfPlayEnv：连续运行 1000 局完整 check-down 对局通过，终局筹码始终守恒为 40000
+- Release 测试不再依赖会被 `NDEBUG` 移除的 `assert`
+- Windows CMake 多配置构建会把最新 `_core.pyd` 输出到可直接导入的 `poker_core/` 目录
+
+底层基础到此可视为完成。CFR 的 MCCFR 训练、DRL/PPO 和比赛决策融合仍属于上层算法工作。
+
+### 协议与状态同步（2026-06-24）
+
+- `ProtocolParser` 会初始化大小盲，并同步双方筹码、底池、`to_call` 和动作历史。
+- `raise N` / `bet N` 中的 `N` 统一表示本次动作投入的筹码量。
+- 进入 flop / turn / river 时会重置本街投入和 `to_call`。
+- TCP 客户端按换行分帧，支持半包、粘包和连接中断后的自动重连。
+- 动作只有在 `sendall()` 成功后才写入本地 `GameState`。
+- `tests/mock_server.py` 可使用随机空闲端口运行一局包含 raise/bet/call 的真实协议测试。

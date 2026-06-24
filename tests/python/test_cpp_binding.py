@@ -51,3 +51,27 @@ def test_environment():
     env = SelfPlayEnv()
     state = env.reset(seed=42)
     assert state.my_cards[0].index() != state.my_cards[1].index()
+    assert state.pot == 150
+    assert state.to_call == 50
+    assert env.is_action_legal(ActionType.CALL)
+    assert not env.is_action_legal(ActionType.CHECK)
+
+def test_environment_can_finish_a_hand():
+    env = SelfPlayEnv()
+    env.set_opponent_policy(lambda state: ActionType.CHECK)
+    env.reset(seed=42)
+    env.step(ActionType.CALL, 0)
+    env.step(ActionType.CHECK, 0)
+    env.step(ActionType.CHECK, 0)
+    result = env.step(ActionType.CHECK, 0)
+    assert result.done
+    assert result.state.stage == Stage.SHOWDOWN
+    assert result.state.my_chips + result.state.opponent_chips == 40000
+
+def test_forced_board_tie_splits_equity():
+    calc = WinRateCalculator()
+    hole = [Card(1, 0), Card(2, 1)]
+    board = [
+        Card(0, 12), Card(0, 11), Card(0, 10), Card(0, 9), Card(0, 8)
+    ]
+    assert calc.calculate(hole, board, 1, 20) == pytest.approx(0.5)

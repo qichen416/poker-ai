@@ -19,7 +19,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         # /O2 最大速度优化，/arch:AVX2 启用 AVX2 指令集，
         # /DNDEBUG 禁用断言，/EHsc 启用 C++ 异常处理，
         # /MP 多核编译，/W3 警告级别 3
-        add_compile_options(/O2 /arch:AVX2 /DNDEBUG /EHsc /MP /W3)
+        add_compile_options(/O2 /arch:AVX2 /DNDEBUG /EHsc /MP /W3 /utf-8)
     else()
         # GCC/Clang：-O3 最高优化，-march=native 生成本机 CPU 指令，
         # -DNDEBUG 禁用断言
@@ -128,6 +128,10 @@ target_link_libraries(_core PRIVATE poker_core_static)
 set_target_properties(_core PROPERTIES
     LIBRARY_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/../poker_core
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/../poker_core
+    LIBRARY_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/../poker_core
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE ${CMAKE_SOURCE_DIR}/../poker_core
+    LIBRARY_OUTPUT_DIRECTORY_DEBUG ${CMAKE_SOURCE_DIR}/../poker_core
+    RUNTIME_OUTPUT_DIRECTORY_DEBUG ${CMAKE_SOURCE_DIR}/../poker_core
 )
 
 # ========== C++ 单元测试 ==========
@@ -142,3 +146,16 @@ add_test(NAME test_hand_eval COMMAND test_hand_eval)
 add_executable(test_cfr tests/test_cfr.cpp)
 target_link_libraries(test_cfr PRIVATE poker_core_static)
 add_test(NAME test_cfr COMMAND test_cfr)
+
+# 测试可执行文件：单挑德州扑克规则环境
+add_executable(test_environment tests/test_environment.cpp)
+target_link_libraries(test_environment PRIVATE poker_core_static)
+add_test(NAME test_environment COMMAND test_environment)
+
+add_executable(test_win_rate tests/test_win_rate.cpp)
+target_link_libraries(test_win_rate PRIVATE poker_core_static)
+add_test(NAME test_win_rate COMMAND test_win_rate)
+
+add_executable(test_card tests/test_card.cpp)
+target_link_libraries(test_card PRIVATE poker_core_static)
+add_test(NAME test_card COMMAND test_card)
